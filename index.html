@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+
+  <head>
+    <meta charset="utf-8">
+
+    <title>Node Buffers, Performance, and Image Glitching</title>
+
+    <meta name="description" content="A Node.js performance case study for Node.js Enthusiasts SE Florida">
+    <meta name="author" content="Bryce B. Baril">
+
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <link rel="stylesheet" href="css/reveal.min.css">
+    <link rel="stylesheet" href="css/theme/moon.css" id="theme">
+
+    <!-- For syntax highlighting -->
+    <link rel="stylesheet" href="lib/css/zenburn.css">
+
+    <!-- If the query includes 'print-pdf', include the PDF print sheet -->
+    <script>
+      if( window.location.search.match( /print-pdf/gi ) ) {
+        var link = document.createElement( 'link' );
+        link.rel = 'stylesheet';
+        link.type = 'text/css';
+        link.href = 'css/print/pdf.css';
+        document.getElementsByTagName( 'head' )[0].appendChild( link );
+      }
+    </script>
+
+    <!--[if lt IE 9]>
+    <script src="lib/js/html5shiv.js"></script>
+    <![endif]-->
+  </head>
+
+  <body>
+
+    <div class="reveal">
+
+      <!-- Any section element inside of this container is displayed as a slide -->
+      <div class="slides">
+        <section>
+          <h1>Node Buffers, Performance, and Image Glitching</h1>
+          <h3>A Performance Optimization Case Study</h3>
+          <p>
+            <small><a href="http://twitter.com/brycebaril">@brycebaril</a></small>
+          </p>
+        </section>
+
+        <section>
+          <h2>Topics</h2>
+          <p>
+            <ul>
+              <li>revisit.link</li>
+              <li>buffers</li>
+              <li>Node.js performance analysis tools</li>
+              <li>case study</li>
+            </ul>
+          </p>
+        </section>
+
+        <section>
+          <h2><a href="http://revisit.link">revisit.link</a></h2>
+          <p>
+            <ul>
+              <li>art project started by <a href="http://twitter.com/ednapiranha">@ednapiranha</a></li>
+              <li>api specification for image glitching/manipulaiton</li>
+            </ul>
+          </p>
+        </section>
+
+        <section>
+          <h2>glitcher</h2>
+          <p>
+            <ul>
+              <li><a href="http://npm.im/readimage">readimage</a> to read gif/png/jpg and convert to common structure</li>
+              <li><a href="http://npm.im/glitcher">glitcher</a> to glitch/manipulate image</li>
+              <li><a href="http://npm.im/writegif">writegif</a> to write to gif</li>
+            </ul>
+          </p>
+        </section>
+
+        <section>
+          <h2>Image Format</h2>
+          <p>Based off <a href="https://developer.mozilla.org/en-US/docs/Web/API/ImageData">HTML5 Canvas ImageData</a>, plus animation frames</p>
+          <pre><code data-trim contenteditable>
+// readimage.Image
+{
+  width: 200,
+  height: 200,
+  frames: [
+    { data: frame_1_rgba_buffer, delay: 100 },
+    { data: frame_2_rgba_buffer, delay: 100 }
+  ]
+}
+          </code></pre>
+        </section>
+
+        <section>
+          <h2>Frame.data Format</h2>
+          <p>Each frame's data property is the same as HTML5 Canvas ImageData "data" except Node.js buffers instad of Uint8ClampedArray</p>
+          <pre><code data-trim contenteditable>
+// A two pixel image data
+Buffer([
+  100, // RED
+  100, // GREEN
+  100, // BLUE
+  255, // ALPHA
+  200, // RED
+  0,   // GREEN
+  99,  // BLUE
+  255  // ALPHA
+])
+          </code></pre>
+        </section>
+
+        <section>
+          <h2>Example</h2>
+          <p>A 50's TV Emulation</p>
+          <pre><code data-trim contenteditable>
+function fiftiesTv(frameData, snowFrequency) {
+  for (var i = 0; i < frameData.length; i+=4) {
+    var maxSaturation = Math.max.apply(null, [
+        frameData[i], frameData[i+1], frameData[i+2]
+    ])
+    // Add a glitchy "snowy" effect
+    if (maxSaturation % snowFrequency === 0) maxSaturation = 255
+    frameData[i] = maxSaturation
+    frameData[i+1] = maxSaturation
+    frameData[i+2] = maxSaturation
+  }
+}
+          </code></pre>
+        </section>
+
+        <section>
+          <h2>Result</h2>
+          <img width=400 src="img/autocorrect.jpg" alt="before">
+          <img width=400 src="img/glitch.gif" alt="after">
+        </section>
+
+        <section>
+          <h2>Buffers</h2>
+          <p>Buffers are a Node.js primitive for dealing with binary data.
+            <ul>
+              <li>Contiguous bytes (0-255) in memory</li>
+              <li>stored outside V8 heap</li>
+              <li>many operations are shallow copies</li>
+              <li>heavily optimized for performance</li>
+              <li>simple list-like API</li>
+              <li>fast to allocate, NOT CLEARED OUT</li>
+            </ul>
+          </p>
+        </section>
+
+        <section>
+          <h2>Buffer API</h2>
+          <p><a href="http://nodejs.org/api/buffer.html">Buffer API Docs</a>
+            <ul>
+              <li>new Buffer(array), new Buffer(size), new Buffer(string)</li>
+              <li>buffer.length for length (bytes), buffer[index] to get/set direct byte</li>
+              <li>Buffer.concat([list, of, buffers])</li>
+              <li>buffer.slice, buffer.copy, buffer.fill</li>
+              <li>buffer.readUint32BE, buffer.writeUint32BE and many more</li>
+            </ul>
+          </p>
+        </section>
+
+        <section>
+          <h2>Performance</h2>
+          <p>Buffers are fast, Node.js is fast... safe to assume performance issues are in the code and algorithms I wrote.</p>
+        </section>
+
+				<section>
+					<h2>Performance Analysis</h2>
+					<p>Measure to make informed decisions!</p>
+				</section>
+
+        <section>
+          <h2>Performance Tooling</h2>
+          <p>I'm going to talk about three different types of performance data.</p>
+          <p>
+            <ul>
+              <li>Flame Graphs</li>
+              <li>Timeline Charts</li>
+              <li>Optimizing Compiler Output</li>
+            </ul>
+          </p>
+        </section>
+
+        <section>
+          <h2>Performance Tooling in Node.js</h2>
+          <p>The unfortunate reality of performance tooling with Node.js:</p>
+          <p>
+            <ul>
+              <li>Immature compared to older platforms</li>
+              <li>V8 bindings are old</li>
+              <li>Not very cross-platform</li>
+            </ul>
+          </p>
+        </section>
+
+        <section>
+          <h2>Flame Graphs</h2>
+          <p>Y = stack depth, X = % of total cpu time spent (<a href="https://gist.github.com/trevnorris/9616784">Instructions</a>)</p>
+          <img width=500 src="img/node-flame.svg" alt="flamegraph">
+        </section>
+
+        <section>
+          <h2>Flame Graphs</h2>
+          <p>Most useful:</p>
+          <p>
+            <ul>
+              <li>when you want to collect for a long period of time</li>
+              <li>to identify where to focus</li>
+              <li>capture C++ time too</li>
+            </ul>
+          </p>
+        </section>
+
+        <section>
+          <h2>Flame Graphs</h2>
+          <p>Caveats</p>
+          <p>
+            <ul>
+              <li>Easiest on SmartOS using dtrace (still not easy)</li>
+              <li>Requires 0.11+ for good output</li>
+              <li>Aggregation removes time axis</li>
+              <li>Can be hard to analyze</li>
+              <li>Inlined functions can be hidden</li>
+            </ul>
+          </p>
+        </section>
+
+        <section>
+          <h2>Timeline Graphs</h2>
+          <p>Y = stack depth, X = time (<a href="http://npm.im/v8-profiler">v8-profiler</a>)</p>
+          <img src="img/timeline.png" alt="timeline">
+        </section>
+
+        <section>
+          <h2>Timeline Graphs</h2>
+          <p>chart view, some aggregation</p>
+          <img src="img/chart.png" alt="timeline chart">
+        </section>
+
+        <section>
+          <h2>Timeline Graphs</h2>
+          <p>Most useful:</p>
+          <p>
+            <ul>
+              <li>want to analyze very targeted location of code</li>
+              <li>much better cross-platform support</li>
+              <li>interested in V8/JavaScript operation</li>
+            </ul>
+          </p>
+        </section>
+
+        <section>
+          <h2>Timeline Graphs</h2>
+          <p>Caveats</p>
+          <p>
+            <ul>
+              <li>Hard to analyze if time frame is too long</li>
+              <li>Requires 0.11+ for good output</li>
+              <li>No aggregation, can be hard to spot patterns</li>
+              <li>Inlined functions can be hidden</li>
+            </ul>
+          </p>
+        </section>
+
+        <section>
+          <h2>Optimizing Compiler Output</h2>
+          <p>Deoptimizations and compiler output (<a href="http://mrale.ph/irhydra/2/">IRHydra2</a>)</p>
+          <img src="img/irhydra.png" alt="irhydra">
+        </section>
+
+        <section>
+          <h2>Optimizing Compiler Output</h2>
+          <p>Most useful:</p>
+          <p>
+            <ul>
+              <li>want insight into deoptimizations of functions</li>
+              <li>want to see exactly what your code does</li>
+              <li>for very fine tuning</li>
+              <li>to show where functions are inlined</li>
+            </ul>
+          </p>
+        </section>
+
+        <section>
+          <h2>Optimizing Compiler Output</h2>
+          <p>Caveats</p>
+          <p>
+            <ul>
+              <li>Can be extremely hard to understand</li>
+              <li>Output not tied to performance/timing data</li>
+              <li>Not helpful if you have good code but a bad algo</li>
+            </ul>
+          </p>
+        </section>
+
+        <section>
+          <h2>Case Study</h2>
+          <p>From the logs I know that one of the slowest glitches is `replaceBackground`.</p>
+          <p>When given an animated gif it calculates a "background" frame, and then for each frame replaces the background with a provided replacement function.</p>
+        </section>
+
+        <section>
+          <pre><code data-trim contenteditable>
+function replaceBackground(frames, replacer, tolerance) {
+  tolerance = tolerance != null ? tolerance : 50
+
+  var background = medianFrame(frames)
+  for (var i = 0; i < frames.length; i++) {
+    var dupe = copy(frames[i].data)
+    replacer(dupe)
+    var rgba = frames[i].data
+    for (var j = 0; j < background.length; j += 4) {
+      var rDiff = Math.abs(rgba[j] - background[j])
+      var gDiff = Math.abs(rgba[j+1] - background[j+1])
+      var bDiff = Math.abs(rgba[j+2] - background[j+2])
+      if (!(rDiff > tolerance || gDiff > tolerance || bDiff > tolerance)) {
+        var start = (j > dupe.length) ? 0 : j
+        rgba[j] = dupe[start + 0]
+        rgba[j+1] = dupe[start + 1]
+        rgba[j+2] = dupe[start + 2]
+      }
+    }
+  }
+}
+          </code></pre>
+        </section>
+
+				<section>
+					<img src="img/spaceballs.gif">
+				</section>
+
+        <section>
+          <p>Step 1: make a test and time it</p>
+<pre><code data-trim contenteditable>
+/usr/bin/time node bg_fg.js img/spaceballs.gif
+3.46user 0.02system 0:03.49elapsed 99%CPU (0avgtext+0avgdata 56308maxresident)k
+0inputs+3232outputs (0major+11355minor)pagefaults 0swaps
+</code></pre>
+        </section>
+
+				<section>
+					<img src="img/median.gif">
+				</section>
+
+				<section>
+					<h2>An Aside...</h2>
+					<p>The gif format is strange... gif optimization isn't handled correctly in the reading library, hence the failed background detection here. However, we're still able to collect good data!</p>
+				</section>
+
+        <section>
+          <p>Tool 1: Flame Graph</p>
+        </section>
+
+        <section>
+          <img src="img/bg.svg">
+        </section>
+
+        <section>
+          <p>Tool 2: Timeline Graph</p>
+        </section>
+
+        <section>
+            <pre><code data-trim contenteditable>
+var profiler = require("v8-profiler")
+profiler.startProfiling("bg")
+
+// ...
+
+bg(orig, function (err, img) {
+  gifwriter(img, function (err, gif) {
+    var data = profiler.stopProfiling("bg")
+    fs.writeFileSync("bg.cpuprofile", JSON.stringify(data))
+    fs.writeFileSync("./output/bg.gif", gif)
+  })
+})
+          </code></pre>
+        </section>
+
+        <section>
+          <img width=550 src="img/case-chart.png">
+        </section>
+
+        <section>
+          <img src="img/case-timeline.png">
+        </section>
+
+        <section>
+          <h2>Analysis</h2>
+          <p>Two main things stand out: inxsearch and medianFrame. inxsearch is in a library, so for now let's focus on medianFrame.</p>
+        </section>
+
+				<section>
+					<p>The timeline chart shows medianFrame is calling avg which is calling sortPixels, which is the culprit of our perf issues.</p>
+				</section>
+
+				<section>
+					<pre><code data-trim contenteditable>
+function medianPixel(pixels) {
+  var sorted = sortPixels(pixels)
+  var mid = (sorted.length / 2) - ((sorted.length / 2) % 4)
+  return sorted.slice(mid, mid + 4)
+}
+
+function medianFrame(frames, alg) {
+  return avg(frames, medianPixel)
+}
+					</code></pre>
+				</section>
+
+				<section>
+					<pre><code data-trim contenteditable>
+function avg(frames, alg) {
+  var len = frames[0].data.length
+  if (len === 1) {
+    return frames[0].data
+  }
+  var avgFrame = new Buffer(len)
+  for (var i = 0; i < len; i += 4) {
+    var pixels = new Buffer(4 * frames.length)
+    for (var j = 0; j < frames.length; j++) {
+      frames[j].data.copy(pixels, j * 4, i, i + 4)
+    }
+    var avgPixel = alg(pixels)
+    avgPixel.copy(avgFrame, i)
+  }
+  return avgFrame
+}
+					</code></pre>
+				</section>
+
+				<section>
+					<pre><code data-trim contenteditable>
+function sortPixels(pixels) {
+  var split = []
+  for (var i = 0; i < pixels.length; i += 4) {
+    split.push(pixels.slice(i, i + 4))
+  }
+  var sorted = split.sort(function (a, b) {
+    return (a[0] + a[1] + a[2] + a[3]) - (b[0] + b[1] + b[2] + b[3])
+  })
+  var newbuff = new Buffer(pixels.length)
+  for (var j = 0; j < sorted.length; j++) {
+    newbuff[j * 4] = sorted[j][0]
+    newbuff[j * 4 + 1] = sorted[j][1]
+    newbuff[j * 4 + 2] = sorted[j][2]
+    newbuff[j * 4 + 3] = sorted[j][3]
+  }
+  return newbuff
+}
+					</code></pre>
+				</section>
+
+				<section>
+					<h2>Some Math</h2>
+					<p>Our image is 480x222 pixels by 30 frames</p>
+						<pre><code data-trim contenteditable>
+480 * 222 = 106560  // number of sortPixels calls
+each sorting an array of 30 pixels
+						</code></pre>
+				</section>
+
+				<section>
+					<p>Tool 3: IRHydra2<p>
+					<img src="img/case-irhydra.png">
+				</section>
+
+				<section>
+					<h2>Analysis</h2>
+					<p>Unfortunately IRHydra2 isn't much help for this issue, all our functions are inlined and never deopt.</p>
+				</section>
+
+				<section>
+					<h2>Any Ideas?</h2>
+				</section>
+
+				<section>
+					<h2>Switch Algorithms!</h2>
+					<p>Median calculation is slow because you need to sort. Let's try the mean instead</p>
+				</section>
+
+				<section>
+					<pre><code data-trim contenteditable>
+function meanPixel(pixels) {
+  if (pixels.length === 0) return new Buffer(4)
+  if (pixels.length === 4) return pixels
+  var p = new Buffer(4)
+  var r = 0, g = 0, b = 0, a = 0
+  for (var i = 0; i < pixels.length; i+= 4) {
+    r += pixels[i]
+    g += pixels[i + 1]
+    b += pixels[i + 2]
+    a += pixels[i + 3]
+  }
+  p[0] = (r / (pixels.length / 4)) >>> 0
+  p[1] = (g / (pixels.length / 4)) >>> 0
+  p[2] = (b / (pixels.length / 4)) >>> 0
+  p[3] = (a / (pixels.length / 4)) >>> 0
+  return p
+}
+					</code></pre>
+				</section>
+
+
+				<section>
+					<img src="img/mean.gif">
+				</section>
+
+				<section>
+					<pre><code data-trim contenteditable>
+/usr/bin/time node bg_fg.js img/spaceballs.gif
+1.83user 0.03system 0:01.88elapsed 99%CPU (0avgtext+0avgdata 55316maxresident)k
+0inputs+3104outputs (0major+11075minor)pagefaults 0swaps
+					</code></pre>
+					<p>From 3.49s to 1.88s!</p>
+				</section>
+
+				<section>
+					<img width=550 src="img/mean-chart.png">
+				</section>
+
+				<section>
+					<h2>Still slow!</h2>
+					<p>Vastly improved by switching to mean from median. The output is different but acceptable. I'm convinced we could make it much faster by:
+						<ul>
+							<li>Fixing inxsearch</li>
+							<li>Finding a better algorithm than per-pixel averages</li>
+							<li>Some other deopt prevention by cleaning up polymorphics</li>
+						</ul>
+				</section>
+
+        <section>
+          <h2>Resources</h2>
+          <p><small>
+            <ul>
+              <li><a href="http://revisit.link">revisit.link</a></li>
+              <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/ImageData">HTML5 ImageData Api</a></li>
+              <li><a href="http://nodejs.org/api/buffer.html">buffers API docs</a></li>
+              <li><a href="https://gist.github.com/trevnorris/9616784">flame graphs on Linux</a></li>
+              <li><a href="http://npm.im/v8-profiler">v8-profiler</a></li>
+              <li><a href="http://mrale.ph/irhydra/2/">IRHydra2</a></li>
+            </ul></small>
+          </p>
+          <p>
+            <small><a href="http://twitter.com/brycebaril">@brycebaril</a> -- <a href="http://github.com/brycebaril">brycebaril on Github</a></small>
+          </p>
+        </section>
+
+				<section>
+					<h2><a href="http://chat.nothingissacred.org">chat.nothingissacred.org</a></h2>
+					<p>Keyword-triggered glitch chat using this library, try:
+						<ul>
+							<li>predator</li>
+							<li>green (red, white, blue, etc.)</li>
+							<li>solarize</li>
+							<li>grayscale</li>
+							<li>bars</li>
+							<li><a href="https://github.com/brycebaril/meatspace-chat-v2/blob/master/lib/glitch.js#L12-L70">Full list here</a></li>
+						</ul>
+					</p>
+
+				</section>
+
+      </div>
+
+    </div>
+
+    <script src="lib/js/head.min.js"></script>
+    <script src="js/reveal.min.js"></script>
+
+    <script>
+
+      // Full list of configuration options available here:
+      // https://github.com/hakimel/reveal.js#configuration
+      Reveal.initialize({
+        controls: true,
+        progress: true,
+        history: true,
+        center: true,
+
+        theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
+        transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+        // Parallax scrolling
+        // parallaxBackgroundImage: 'https://s3.amazonaws.com/hakim-static/reveal-js/reveal-parallax-1.jpg',
+        // parallaxBackgroundSize: '2100px 900px',
+
+        // Optional libraries used to extend on reveal.js
+        dependencies: [
+          { src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+          { src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+          { src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+          { src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+          { src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+          { src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }
+        ]
+      });
+
+    </script>
+
+  </body>
+</html>
